@@ -2,10 +2,10 @@
 
 PluginInfo = {
     Name = "Biamp Tesira Control",
-    Version = "2.0.0.002",
+    Version = "2.0.0.004",
     BuildVersion = "2.0.0.1",
     Id = "251df8be-039c-4934-933e-1b327b8edef2",
-    Author = "Dustin",
+    Author = "Dustin Bennett",
     Description = "Control Biamp Tesira via TTP with separate Mute/Level controls and auto-mute logic"
 }
 
@@ -28,7 +28,7 @@ function GetProperties()
         {
             Name = "IP Address",
             Type = "string",
-            Value = "127.0.0.1"
+            Value = "192.168.0.14"
         },
         {
             Name = "Level + Mute Count",
