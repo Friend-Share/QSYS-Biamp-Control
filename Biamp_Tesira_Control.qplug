@@ -2,7 +2,7 @@
 
 PluginInfo = {
     Name = "Biamp Tesira Control",
-    Version = "2.0.0.001",
+    Version = "2.0.0.002",
     BuildVersion = "2.0.0.1",
     Id = "251df8be-039c-4934-933e-1b327b8edef2",
     Author = "Dustin",
@@ -74,6 +74,7 @@ function GetControls(props)
         table.insert(controls, { Name = "Label_L_" .. i, ControlType = "Text", PinStyle = "Both", UserPin = true, Count = 1 })
         table.insert(controls, { Name = "VolUp_" .. i, ControlType = "Button", ButtonType = "Momentary", PinStyle = "Both", UserPin = true, Count = 1 })
         table.insert(controls, { Name = "VolDn_" .. i, ControlType = "Button", ButtonType = "Momentary", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "RampStep_L_" .. i, ControlType = "Knob", ControlUnit = "dB", Min = 0.5, Max = 20, PinStyle = "Both", UserPin = true, Count = 1 })
     end
     
     for i = 1, muteCount do
@@ -100,18 +101,20 @@ function GetControlLayout(props)
         
         local yPos = 50
         if lvlCount > 0 then
-            table.insert(graphics, { Type = "Header", Text = "Level + Mute Config", Position = {10, yPos}, Size = {380, 20} })
+            table.insert(graphics, { Type = "Header", Text = "Level + Mute Config", Position = {10, yPos}, Size = {470, 20} })
             yPos = yPos + 25
             table.insert(graphics, { Type = "Text", Text = "Ch", Position = {10, yPos}, Size = {30, 20}, FontStyle = "Bold" })
             table.insert(graphics, { Type = "Text", Text = "Label", Position = {50, yPos}, Size = {120, 20}, FontStyle = "Bold" })
             table.insert(graphics, { Type = "Text", Text = "Instance Tag", Position = {180, yPos}, Size = {150, 20}, FontStyle = "Bold" })
             table.insert(graphics, { Type = "Text", Text = "Index", Position = {340, yPos}, Size = {50, 20}, FontStyle = "Bold" })
+            table.insert(graphics, { Type = "Text", Text = "Step (dB)", Position = {400, yPos}, Size = {60, 20}, FontStyle = "Bold" })
             yPos = yPos + 25
             for i = 1, lvlCount do
                 table.insert(graphics, { Type = "Text", Text = tostring(i), Position = {10, yPos}, Size = {30, 20} })
                 layout["Label_L_" .. i] = { Style = "Text", Position = {50, yPos}, Size = {120, 20} }
                 layout["InstanceTag_L_" .. i] = { Style = "Text", Position = {180, yPos}, Size = {150, 20} }
                 layout["ChannelIndex_L_" .. i] = { Style = "Text", Position = {340, yPos}, Size = {50, 20} }
+                layout["RampStep_L_" .. i] = { Style = "Text", Position = {400, yPos}, Size = {60, 20} }
                 yPos = yPos + 25
             end
         end
@@ -193,6 +196,8 @@ if Controls then
     local biampIP = Properties["IP Address"].Value
     
     local rampTimers = {}
+    local rateTimers = {}
+    local pendingValues = {}
     
     local function sendCmd(cmd)
         if connType == "TCP" then
@@ -313,11 +318,28 @@ if Controls then
     -- Handlers for Level + Mute
     for i = 1, lvlCount do
         rampTimers[i] = Timer.New()
+        rateTimers[i] = Timer.New()
         local rampDirection = 0 -- 1 for up, -1 for down
+        
+        -- Rate Limiter
+        rateTimers[i].EventHandler = function()
+            if pendingValues[i] ~= nil then
+                local tag = Controls["InstanceTag_L_" .. i].String
+                local index = Controls["ChannelIndex_L_" .. i].String
+                if tag ~= "" and index ~= "" then
+                    sendCmd(string.format("%s set level %s %.4f\r\n", tag, index, pendingValues[i]))
+                end
+                pendingValues[i] = nil
+                rateTimers[i]:Start(0.1) -- Run again in 100ms
+            else
+                rateTimers[i]:Stop()
+            end
+        end
         
         rampTimers[i].EventHandler = function()
             local currentVal = Controls["Level_" .. i].Value
-            local step = 2.0 -- 2dB per tick (adjust for speed)
+            local step = Controls["RampStep_L_" .. i].Value
+            if step <= 0 then step = 2.0 end -- default step
             local newVal = currentVal + (rampDirection * step)
             
             if newVal > 12 then newVal = 12 end
@@ -370,7 +392,12 @@ if Controls then
             end
             
             if tag ~= "" and index ~= "" then
-                sendCmd(string.format("%s set level %s %.4f\r\n", tag, index, ctrl.Value))
+                if not rateTimers[i].IsRunning then
+                    sendCmd(string.format("%s set level %s %.4f\r\n", tag, index, ctrl.Value))
+                    rateTimers[i]:Start(0.1)
+                else
+                    pendingValues[i] = ctrl.Value
+                end
             end
         end
         
