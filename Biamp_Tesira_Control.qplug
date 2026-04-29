@@ -64,9 +64,7 @@ function GetControls(props)
     if connType == "RS-232" then
         table.insert(controls, { Name = "SerialPort", ControlType = "SerialPort", PinStyle = "Both", UserPin = true, Count = 1 })
     end
-    table.insert(controls, { Name = "Connect", ControlType = "Button", ButtonType = "Toggle", PinStyle = "Both", UserPin = true, Count = 1 })
     table.insert(controls, { Name = "ConnectionState", ControlType = "Indicator", IndicatorType = "Led", PinStyle = "Output", UserPin = true, Count = 1 })
-    table.insert(controls, { Name = "Refresh", ControlType = "Button", ButtonType = "Trigger", PinStyle = "Both", UserPin = true, Count = 1 })
     
     for i = 1, lvlCount do
         table.insert(controls, { Name = "InstanceTag_L_" .. i, ControlType = "Text", PinStyle = "Both", UserPin = true, Count = 1 })
@@ -97,13 +95,10 @@ function GetControlLayout(props)
     
     if current_page == 1 then
         -- Settings Page
-        layout["Connect"] = { Style = "Button", Position = {10, 10}, Size = {100, 20}, Legend = "Connect" }
-        layout["ConnectionState"] = { Style = "Led", Position = {120, 10}, Size = {20, 20} }
+        table.insert(graphics, { Type = "Text", Text = "Connection Status:", Position = {10, 10}, Size = {120, 20}, HTextAlign = "Right" })
+        layout["ConnectionState"] = { Style = "Led", Position = {140, 10}, Size = {20, 20} }
         
-        table.insert(graphics, { Type = "Text", Text = "Resend Subs:", Position = {10, 40}, Size = {100, 20}, HTextAlign = "Right" })
-        layout["Refresh"] = { Style = "Button", Position = {115, 40}, Size = {100, 20}, Legend = "Refresh" }
-        
-        local yPos = 90
+        local yPos = 50
         if lvlCount > 0 then
             table.insert(graphics, { Type = "Header", Text = "Level + Mute Config", Position = {10, yPos}, Size = {380, 20} })
             yPos = yPos + 25
@@ -287,40 +282,33 @@ if Controls then
     else
         -- RS-232 Mode
         if Controls.SerialPort then
+            Controls.ConnectionState.Boolean = true
             Controls.SerialPort.EventHandler = function(port)
                 parseData(port:Read(port.BufferLength))
             end
         end
     end
     
-    Controls.Connect.EventHandler = function()
-        if Controls.Connect.Boolean then
-            if connType == "TCP" then
-                local ip = Properties["IP Address"].Value
-                if ip and ip ~= "" then
-                    sock:Connect(ip, 23)
-                else
-                    print("Error: No IP Address configured in properties.")
-                    Controls.Connect.Boolean = false
-                end
-            else
-                -- RS-232
-                Controls.ConnectionState.Boolean = true
-                sendCmd("SESSION set verbose true\r\n")
-                setupSubscriptions()
-            end
-        else
-            if connType == "TCP" then
-                sock:Disconnect()
-            else
-                Controls.ConnectionState.Boolean = false
-            end
-        end
-    end
-    
-    Controls.Refresh.EventHandler = function()
+    local refreshTimer = Timer.New()
+    refreshTimer.EventHandler = function()
         setupSubscriptions()
     end
+    
+    -- Auto-Initialize
+    if connType == "TCP" then
+        if biampIP and biampIP ~= "" then
+            sock:Connect(biampIP, 23)
+        else
+            print("Error: No IP Address configured in properties.")
+        end
+    else
+        -- Start subscriptions directly for RS-232 since it's always "connected"
+        sendCmd("SESSION set verbose true\r\n")
+        setupSubscriptions()
+    end
+    
+    -- Refresh every 5 minutes (300 seconds)
+    refreshTimer:Start(300)
     
     -- Handlers for Level + Mute
     for i = 1, lvlCount do
