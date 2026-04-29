@@ -1,0 +1,416 @@
+-- Biamp Tesira Control Plugin V2
+
+PluginInfo = {
+    Name = "Biamp Tesira Control",
+    Version = "2.0.0.001",
+    BuildVersion = "2.0.0.1",
+    Id = "251df8be-039c-4934-933e-1b327b8edef2",
+    Author = "Dustin",
+    Description = "Control Biamp Tesira via TTP with separate Mute/Level controls and auto-mute logic"
+}
+
+function GetColor(props)
+    return { 142, 214, 219 } -- Biamp-ish blue/teal
+end
+
+function GetPrettyName(props)
+    return "Biamp Tesira\nControl"
+end
+
+function GetProperties()
+    return {
+        {
+            Name = "Connection Type",
+            Type = "enum",
+            Choices = {"TCP", "RS-232"},
+            Value = "TCP"
+        },
+        {
+            Name = "IP Address",
+            Type = "string",
+            Value = "127.0.0.1"
+        },
+        {
+            Name = "Level + Mute Count",
+            Type = "integer",
+            Min = 0,
+            Max = 64,
+            Value = 8
+        },
+        {
+            Name = "Mute Only Count",
+            Type = "integer",
+            Min = 0,
+            Max = 64,
+            Value = 4
+        }
+    }
+end
+
+function GetPages(props)
+    return {
+        { name = "Settings" },
+        { name = "Controls" }
+    }
+end
+
+function GetControls(props)
+    local controls = {}
+    local lvlCount = props["Level + Mute Count"].Value
+    local muteCount = props["Mute Only Count"].Value
+    
+    -- Connection settings
+    local connType = props["Connection Type"].Value
+    if connType == "RS-232" then
+        table.insert(controls, { Name = "SerialPort", ControlType = "SerialPort", PinStyle = "Both", UserPin = true, Count = 1 })
+    end
+    table.insert(controls, { Name = "Connect", ControlType = "Button", ButtonType = "Toggle", PinStyle = "Both", UserPin = true, Count = 1 })
+    table.insert(controls, { Name = "ConnectionState", ControlType = "Indicator", IndicatorType = "Led", PinStyle = "Output", UserPin = true, Count = 1 })
+    table.insert(controls, { Name = "Refresh", ControlType = "Button", ButtonType = "Trigger", PinStyle = "Both", UserPin = true, Count = 1 })
+    
+    for i = 1, lvlCount do
+        table.insert(controls, { Name = "InstanceTag_L_" .. i, ControlType = "Text", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "ChannelIndex_L_" .. i, ControlType = "Text", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "Level_" .. i, ControlType = "Knob", ControlUnit = "dB", Min = -100, Max = 12, PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "Mute_L_" .. i, ControlType = "Button", ButtonType = "Toggle", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "Label_L_" .. i, ControlType = "Text", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "VolUp_" .. i, ControlType = "Button", ButtonType = "Momentary", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "VolDn_" .. i, ControlType = "Button", ButtonType = "Momentary", PinStyle = "Both", UserPin = true, Count = 1 })
+    end
+    
+    for i = 1, muteCount do
+        table.insert(controls, { Name = "InstanceTag_M_" .. i, ControlType = "Text", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "ChannelIndex_M_" .. i, ControlType = "Text", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "Mute_M_" .. i, ControlType = "Button", ButtonType = "Toggle", PinStyle = "Both", UserPin = true, Count = 1 })
+        table.insert(controls, { Name = "Label_M_" .. i, ControlType = "Text", PinStyle = "Both", UserPin = true, Count = 1 })
+    end
+    
+    return controls
+end
+
+function GetControlLayout(props)
+    local layout = {}
+    local graphics = {}
+    local lvlCount = props["Level + Mute Count"].Value
+    local muteCount = props["Mute Only Count"].Value
+    local current_page = props["page_index"].Value
+    
+    if current_page == 1 then
+        -- Settings Page
+        layout["Connect"] = { Style = "Button", Position = {10, 10}, Size = {100, 20}, Legend = "Connect" }
+        layout["ConnectionState"] = { Style = "Led", Position = {120, 10}, Size = {20, 20} }
+        
+        table.insert(graphics, { Type = "Text", Text = "Resend Subs:", Position = {10, 40}, Size = {100, 20}, HTextAlign = "Right" })
+        layout["Refresh"] = { Style = "Button", Position = {115, 40}, Size = {100, 20}, Legend = "Refresh" }
+        
+        local yPos = 90
+        if lvlCount > 0 then
+            table.insert(graphics, { Type = "Header", Text = "Level + Mute Config", Position = {10, yPos}, Size = {380, 20} })
+            yPos = yPos + 25
+            table.insert(graphics, { Type = "Text", Text = "Ch", Position = {10, yPos}, Size = {30, 20}, FontStyle = "Bold" })
+            table.insert(graphics, { Type = "Text", Text = "Label", Position = {50, yPos}, Size = {120, 20}, FontStyle = "Bold" })
+            table.insert(graphics, { Type = "Text", Text = "Instance Tag", Position = {180, yPos}, Size = {150, 20}, FontStyle = "Bold" })
+            table.insert(graphics, { Type = "Text", Text = "Index", Position = {340, yPos}, Size = {50, 20}, FontStyle = "Bold" })
+            yPos = yPos + 25
+            for i = 1, lvlCount do
+                table.insert(graphics, { Type = "Text", Text = tostring(i), Position = {10, yPos}, Size = {30, 20} })
+                layout["Label_L_" .. i] = { Style = "Text", Position = {50, yPos}, Size = {120, 20} }
+                layout["InstanceTag_L_" .. i] = { Style = "Text", Position = {180, yPos}, Size = {150, 20} }
+                layout["ChannelIndex_L_" .. i] = { Style = "Text", Position = {340, yPos}, Size = {50, 20} }
+                yPos = yPos + 25
+            end
+        end
+        
+        if muteCount > 0 then
+            yPos = yPos + 10
+            table.insert(graphics, { Type = "Header", Text = "Mute Only Config", Position = {10, yPos}, Size = {380, 20} })
+            yPos = yPos + 25
+            table.insert(graphics, { Type = "Text", Text = "Ch", Position = {10, yPos}, Size = {30, 20}, FontStyle = "Bold" })
+            table.insert(graphics, { Type = "Text", Text = "Label", Position = {50, yPos}, Size = {120, 20}, FontStyle = "Bold" })
+            table.insert(graphics, { Type = "Text", Text = "Instance Tag", Position = {180, yPos}, Size = {150, 20}, FontStyle = "Bold" })
+            table.insert(graphics, { Type = "Text", Text = "Index", Position = {340, yPos}, Size = {50, 20}, FontStyle = "Bold" })
+            yPos = yPos + 25
+            for i = 1, muteCount do
+                table.insert(graphics, { Type = "Text", Text = tostring(i), Position = {10, yPos}, Size = {30, 20} })
+                layout["Label_M_" .. i] = { Style = "Text", Position = {50, yPos}, Size = {120, 20} }
+                layout["InstanceTag_M_" .. i] = { Style = "Text", Position = {180, yPos}, Size = {150, 20} }
+                layout["ChannelIndex_M_" .. i] = { Style = "Text", Position = {340, yPos}, Size = {50, 20} }
+                yPos = yPos + 25
+            end
+        end
+
+    elseif current_page == 2 then
+        -- Controls Page
+        local ctrlX = 10
+        local ctrlY = 10
+        
+        -- Level + Mute blocks
+        for i = 1, lvlCount do
+            if i > 1 and (i - 1) % 4 == 0 then
+                ctrlX = ctrlX + 160
+                ctrlY = 10
+            end
+            
+            table.insert(graphics, { Type = "Text", Text = "Ch " .. i, Position = {ctrlX, ctrlY}, Size = {140, 20}, HTextAlign = "Center" })
+            
+            layout["Level_" .. i] = { Style = "Fader", Position = {ctrlX + 20, ctrlY + 25}, Size = {40, 120} }
+            
+            layout["VolUp_" .. i] = { Style = "Button", Position = {ctrlX + 80, ctrlY + 25}, Size = {40, 30}, Legend = "▲" }
+            layout["VolDn_" .. i] = { Style = "Button", Position = {ctrlX + 80, ctrlY + 70}, Size = {40, 30}, Legend = "▼" }
+            
+            layout["Mute_L_" .. i] = { Style = "Button", Position = {ctrlX + 80, ctrlY + 115}, Size = {40, 30}, Legend = "Mute", Color = {255, 0, 0} }
+            
+            ctrlY = ctrlY + 160
+        end
+        
+        -- Mute Only blocks
+        if muteCount > 0 then
+            ctrlX = ctrlX + 160
+            ctrlY = 10
+            for i = 1, muteCount do
+                if i > 1 and (i - 1) % 4 == 0 then
+                    ctrlX = ctrlX + 160
+                    ctrlY = 10
+                end
+                
+                table.insert(graphics, { Type = "Text", Text = "Mute " .. i, Position = {ctrlX, ctrlY}, Size = {140, 20}, HTextAlign = "Center" })
+                layout["Mute_M_" .. i] = { Style = "Button", Position = {ctrlX + 50, ctrlY + 25}, Size = {40, 30}, Legend = "Mute", Color = {255, 0, 0} }
+                
+                ctrlY = ctrlY + 70
+            end
+        end
+    end
+    
+    return layout, graphics
+end
+
+if Controls then
+    -- Runtime Logic
+    local sock = TcpSocket.New()
+    sock.ReadTimeout = 0
+    sock.WriteTimeout = 0
+    sock.ReconnectTimeout = 5
+    
+    local rxBuffer = ""
+    local lvlCount = Properties["Level + Mute Count"].Value
+    local muteCount = Properties["Mute Only Count"].Value
+    local connType = Properties["Connection Type"].Value
+    local biampIP = Properties["IP Address"].Value
+    
+    local rampTimers = {}
+    
+    local function sendCmd(cmd)
+        if connType == "TCP" then
+            if sock.IsConnected then sock:Write(cmd) end
+        else
+            if Controls.SerialPort then Controls.SerialPort:Write(cmd) end
+        end
+    end
+    
+    local function setupSubscriptions()
+        if connType == "TCP" and not sock.IsConnected then return end
+        
+        sendCmd("SESSION unsubscribe all\r\n")
+        
+        -- Level + Mute Subscriptions
+        for i = 1, lvlCount do
+            local tag = Controls["InstanceTag_L_" .. i].String
+            local index = Controls["ChannelIndex_L_" .. i].String
+            if tag and tag ~= "" and index and index ~= "" then
+                sendCmd(string.format('%s subscribe level %s Level_%d 50\r\n', tag, index, i))
+                sendCmd(string.format('%s subscribe mute %s Mute_L_%d 50\r\n', tag, index, i))
+            end
+        end
+        
+        -- Mute Only Subscriptions
+        for i = 1, muteCount do
+            local tag = Controls["InstanceTag_M_" .. i].String
+            local index = Controls["ChannelIndex_M_" .. i].String
+            if tag and tag ~= "" and index and index ~= "" then
+                sendCmd(string.format('%s subscribe mute %s Mute_M_%d 50\r\n', tag, index, i))
+            end
+        end
+    end
+    
+    local function parseData(data)
+        rxBuffer = rxBuffer .. data
+        
+        while rxBuffer:find("\r\n") do
+            local line = rxBuffer:sub(1, rxBuffer:find("\r\n") - 1)
+            rxBuffer = rxBuffer:sub(rxBuffer:find("\r\n") + 2)
+            
+            if line:match('! "publishToken":') then
+                local token, value = line:match('! "publishToken":"(.-)" "value":(.*)')
+                
+                if token and value then
+                    local lvlIdx = token:match('^Level_(%d+)$')
+                    if lvlIdx then
+                        local lvlVal = tonumber(value)
+                        if lvlVal then
+                            Controls["Level_" .. lvlIdx].Value = lvlVal
+                            if lvlVal <= -100 and not Controls["Mute_L_" .. lvlIdx].Boolean then
+                                Controls["Mute_L_" .. lvlIdx].Boolean = true
+                            elseif lvlVal > -100 and Controls["Mute_L_" .. lvlIdx].Boolean then
+                                Controls["Mute_L_" .. lvlIdx].Boolean = false
+                            end
+                        end
+                    end
+                    
+                    local muteLIdx = token:match('^Mute_L_(%d+)$')
+                    if muteLIdx then
+                        Controls["Mute_L_" .. muteLIdx].Boolean = (value == "true")
+                    end
+                    
+                    local muteMIdx = token:match('^Mute_M_(%d+)$')
+                    if muteMIdx then
+                        Controls["Mute_M_" .. muteMIdx].Boolean = (value == "true")
+                    end
+                end
+            end
+        end
+    end
+    
+    if connType == "TCP" then
+        sock.EventHandler = function(s, evt)
+            if evt == TcpSocket.Events.Connected then
+                print("Connected to Biamp Tesira (TCP)")
+                Controls.ConnectionState.Boolean = true
+                sock:Write("SESSION set verbose true\r\n")
+                setupSubscriptions()
+            elseif evt == TcpSocket.Events.Closed or evt == TcpSocket.Events.Timeout or evt == TcpSocket.Events.Error then
+                print("Socket Closed/Error")
+                Controls.ConnectionState.Boolean = false
+            elseif evt == TcpSocket.Events.Data then
+                parseData(s:Read(s.BufferLength))
+            end
+        end
+    else
+        -- RS-232 Mode
+        if Controls.SerialPort then
+            Controls.SerialPort.EventHandler = function(port)
+                parseData(port:Read(port.BufferLength))
+            end
+        end
+    end
+    
+    Controls.Connect.EventHandler = function()
+        if Controls.Connect.Boolean then
+            if connType == "TCP" then
+                local ip = Properties["IP Address"].Value
+                if ip and ip ~= "" then
+                    sock:Connect(ip, 23)
+                else
+                    print("Error: No IP Address configured in properties.")
+                    Controls.Connect.Boolean = false
+                end
+            else
+                -- RS-232
+                Controls.ConnectionState.Boolean = true
+                sendCmd("SESSION set verbose true\r\n")
+                setupSubscriptions()
+            end
+        else
+            if connType == "TCP" then
+                sock:Disconnect()
+            else
+                Controls.ConnectionState.Boolean = false
+            end
+        end
+    end
+    
+    Controls.Refresh.EventHandler = function()
+        setupSubscriptions()
+    end
+    
+    -- Handlers for Level + Mute
+    for i = 1, lvlCount do
+        rampTimers[i] = Timer.New()
+        local rampDirection = 0 -- 1 for up, -1 for down
+        
+        rampTimers[i].EventHandler = function()
+            local currentVal = Controls["Level_" .. i].Value
+            local step = 2.0 -- 2dB per tick (adjust for speed)
+            local newVal = currentVal + (rampDirection * step)
+            
+            if newVal > 12 then newVal = 12 end
+            if newVal < -100 then newVal = -100 end
+            
+            Controls["Level_" .. i].Value = newVal
+            Controls["Level_" .. i].EventHandler(Controls["Level_" .. i])
+            
+            if newVal == 12 or newVal == -100 then
+                rampTimers[i]:Stop()
+            end
+        end
+        
+        Controls["VolUp_" .. i].EventHandler = function(ctrl)
+            if ctrl.Boolean then
+                rampDirection = 1
+                rampTimers[i]:Start(0.1) -- 100ms interval
+                rampTimers[i].EventHandler() -- Fire immediately
+            else
+                rampTimers[i]:Stop()
+            end
+        end
+        
+        Controls["VolDn_" .. i].EventHandler = function(ctrl)
+            if ctrl.Boolean then
+                rampDirection = -1
+                rampTimers[i]:Start(0.1)
+                rampTimers[i].EventHandler()
+            else
+                rampTimers[i]:Stop()
+            end
+        end
+        
+        Controls["Level_" .. i].EventHandler = function(ctrl)
+            local tag = Controls["InstanceTag_L_" .. i].String
+            local index = Controls["ChannelIndex_L_" .. i].String
+            
+            if ctrl.Value > -100 and Controls["Mute_L_" .. i].Boolean then
+                -- Auto Unmute
+                Controls["Mute_L_" .. i].Boolean = false
+                if tag ~= "" and index ~= "" then
+                    sendCmd(string.format("%s set mute %s false\r\n", tag, index))
+                end
+            elseif ctrl.Value <= -100 and not Controls["Mute_L_" .. i].Boolean then
+                -- Auto Mute
+                Controls["Mute_L_" .. i].Boolean = true
+                if tag ~= "" and index ~= "" then
+                    sendCmd(string.format("%s set mute %s true\r\n", tag, index))
+                end
+            end
+            
+            if tag ~= "" and index ~= "" then
+                sendCmd(string.format("%s set level %s %.4f\r\n", tag, index, ctrl.Value))
+            end
+        end
+        
+        Controls["Mute_L_" .. i].EventHandler = function(ctrl)
+            local tag = Controls["InstanceTag_L_" .. i].String
+            local index = Controls["ChannelIndex_L_" .. i].String
+            if tag ~= "" and index ~= "" then
+                local boolStr = ctrl.Boolean and "true" or "false"
+                sendCmd(string.format("%s set mute %s %s\r\n", tag, index, boolStr))
+            end
+        end
+        
+        Controls["InstanceTag_L_" .. i].EventHandler = setupSubscriptions
+        Controls["ChannelIndex_L_" .. i].EventHandler = setupSubscriptions
+    end
+    
+    -- Handlers for Mute Only
+    for i = 1, muteCount do
+        Controls["Mute_M_" .. i].EventHandler = function(ctrl)
+            local tag = Controls["InstanceTag_M_" .. i].String
+            local index = Controls["ChannelIndex_M_" .. i].String
+            if tag ~= "" and index ~= "" then
+                local boolStr = ctrl.Boolean and "true" or "false"
+                sendCmd(string.format("%s set mute %s %s\r\n", tag, index, boolStr))
+            end
+        end
+        
+        Controls["InstanceTag_M_" .. i].EventHandler = setupSubscriptions
+        Controls["ChannelIndex_M_" .. i].EventHandler = setupSubscriptions
+    end
+end
